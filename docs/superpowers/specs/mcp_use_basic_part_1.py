@@ -42,7 +42,7 @@ async def main():
 
     # Shorter, reliable smoke: fetch a page title (avoids Google captcha blocks)
     result = await agent.run(
-        "Use browser tools to open https://example.com and report the visible page title."
+        "Use browser tools to open https://google.com and report the visible page title."
     )
 
     print(f"\nResult: {result}")
