@@ -16,11 +16,26 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # the schema expects real values. These hints reduce "invalid_type" / validation errors.
 _PLAYWRIGHT_TOOL_GUIDANCE = """
 When you call Playwright tools, match the tool schema exactly (no nulls for required fields):
-- browser_click: include "element" (string), "ref" (string from the latest snapshot), "doubleClick" (false for a normal click), "button" ("left" unless you need "right" or "middle"), and "modifiers" (use [] for none).
-- browser_snapshot: prefer calling with "depth" (e.g. 2 or 3) and "filename" (e.g. "snap.md") together if you need a file; do not pass empty objects with null fields.
-- browser_evaluate: use only the arguments defined for that tool (usually "function"); do not mix in other tools' fields.
-If a call fails validation, fix the arguments and try again in fewer steps.
+- browser_click: ALWAYS include "doubleClick": false, "button": "left", "modifiers": [] for a normal single click, plus "element" and "ref". Never guess refs.
+- Refs: copy the "ref" value EXACTLY from the *most recent* browser_snapshot text for the current page. If a click says "ref not found", call browser_snapshot again and use a ref that appears in the new output—do not reuse old ref IDs.
+- browser_snapshot: use "depth" and "filename" together (e.g. depth 3, "snap.md") when you need a saved snapshot; never pass nulls.
+- browser_evaluate: only use {"function": "..."} with your JS string. Do not add "element", "ref", or "filename" to browser_evaluate.
+If a call fails, fix the arguments and try again. Prefer fewer, smaller steps to save tokens.
 """
+
+# Cheaper / smaller context models hit OpenAI rate limits (TPM) less often for long runs.
+# Compare: https://platform.openai.com/docs/models
+def _openai_model() -> str:
+    return (os.environ.get("OPENAI_MODEL") or "gpt-4.1").strip() or "gpt-4.1"
+
+
+def _build_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=_openai_model(),
+        temperature=0,
+        # Helps with brief OpenAI 429 "rate limit" responses (backoff and retry)
+        max_retries=6,
+    )
 
 
 def _agent_max_steps() -> int:
@@ -105,7 +120,7 @@ async def main():
 
     try:
         agent = MCPAgent(
-            llm=ChatOpenAI(model="gpt-4.1", temperature=0),
+            llm=_build_llm(),
             client=client,
             max_steps=_agent_max_steps(),
             additional_instructions=_PLAYWRIGHT_TOOL_GUIDANCE,
