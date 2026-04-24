@@ -12,6 +12,20 @@ from mcp_use import MCPAgent, MCPClient
 # Load secrets from .env next to this script (keep .env out of git; see .env.example)
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+# Playwright MCP tools validate inputs strictly. The model must not send JSON nulls where
+# the schema expects real values. These hints reduce "invalid_type" / validation errors.
+_PLAYWRIGHT_TOOL_GUIDANCE = """
+When you call Playwright tools, match the tool schema exactly (no nulls for required fields):
+- browser_click: include "element" (string), "ref" (string from the latest snapshot), "doubleClick" (false for a normal click), "button" ("left" unless you need "right" or "middle"), and "modifiers" (use [] for none).
+- browser_snapshot: prefer calling with "depth" (e.g. 2 or 3) and "filename" (e.g. "snap.md") together if you need a file; do not pass empty objects with null fields.
+- browser_evaluate: use only the arguments defined for that tool (usually "function"); do not mix in other tools' fields.
+If a call fails validation, fix the arguments and try again in fewer steps.
+"""
+
+
+def _agent_max_steps() -> int:
+    return max(5, int(os.environ.get("AGENT_MAX_STEPS", "50")))
+
 
 def _build_agent_task() -> str:
     """Build the user task string from env. Source code must stay credential-free.
@@ -31,7 +45,7 @@ def _build_agent_task() -> str:
                 "USE_LINKEDIN_DEMO=1 requires LINKEDIN_EMAIL and LINKEDIN_PASSWORD in .env"
             )
         return (
-            "Use browser tools: open https://www.linkedin.com, sign in with this email and "
+            "Use browser tools: open https://www.linkedin.com, Click on the sign in button, then sign in with this email and "
             f"this password, then go to the Jobs area, search for SDET jobs, and summarize "
             f"the first result (title and company). Email: {email} Password: {password}"
         )
@@ -93,7 +107,8 @@ async def main():
         agent = MCPAgent(
             llm=ChatOpenAI(model="gpt-4.1", temperature=0),
             client=client,
-            max_steps=15,
+            max_steps=_agent_max_steps(),
+            additional_instructions=_PLAYWRIGHT_TOOL_GUIDANCE,
         )
 
         result = await agent.run(_build_agent_task())
