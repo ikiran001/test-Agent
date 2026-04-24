@@ -16,15 +16,14 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # the schema expects real values. These hints reduce "invalid_type" / validation errors.
 _PLAYWRIGHT_TOOL_GUIDANCE = """
 When you call Playwright tools, match the tool schema exactly (no nulls for required fields):
-- browser_snapshot: ALWAYS pass BOTH "depth" (e.g. 3) and "filename" (e.g. "page.md") in the same call. For login pages use depth 5 or higher so text fields appear in the tree. Do not pass only "depth"—it will fail validation.
-- Stale refs: every [ref=e…] is tied to a specific snapshot. After ANY navigation, click, or browser_type, the DOM and refs can change. If browser_type or browser_click says "ref not found", you MUST run browser_snapshot again and use ONLY refs from that new output—never reuse an old ref (e.g. e28) from a prior snapshot.
-- Login forms: prefer browser_fill_form with a single "fields" array: fill all visible textbox fields in ONE tool call, each with type "textbox", using refs from the *same* browser_snapshot taken immediately before. That avoids the common bug of typing the email, then using an outdated ref for the password.
-- If you must use two browser_type steps: (1) snapshot, (2) type email, (3) new snapshot, (4) type password with ref from step 3 only.
-- browser_click: ALWAYS include "element", "ref", "doubleClick": false, "button": "left", "modifiers": [].
-- Refs: use exact ids from [ref=e12] style lines in the *latest* snapshot. Never invent refs.
-- If a click hit the wrong element, use browser_navigate to a direct URL instead of more bad clicks.
+- browser_snapshot: ALWAYS pass BOTH "depth" (e.g. 3) and "filename" in the same call. For login pages use depth 5+.
+- Wrong ref: refs like e19 are often a *list* or nav chrome, not an input. Only use a ref for browser_type if the snapshot line is clearly a textbox. If unsure, use a CSS *selector* instead.
+- On https://www.linkedin.com/login, prefer browser_fill_form with two fields in one call, using **selector** for each: email `input#username` or `input[name="session_key"]`, password `input#password` or `input[name="session_password"]`. Each field still needs a string "ref" in the schema; use placeholder "_" when using selector (the server uses selector when present).
+- browser_type: include "element", "ref" (or "_" with "selector"), "text", "submit": false, "slowly": false. You may set "selector" to target an input when aria-ref is wrong.
+- Stale refs: after navigation, take a new snapshot before another ref-based action.
+- browser_click: include "element", "ref", "doubleClick": false, "button": "left", "modifiers": [].
 - browser_evaluate: only {"function": "..."} with your JS string.
-LinkedIn login may use anti-bot, captchas, or iframes; automation often still cannot complete. Use /login for the form.
+Captchas / anti-bot may still block. Selector-based fill is more reliable than guessing e* on LinkedIn.
 """
 
 # Cheaper / smaller context models hit OpenAI rate limits (TPM) less often for long runs.
@@ -64,14 +63,12 @@ def _build_agent_task() -> str:
                 "USE_LINKEDIN_DEMO=1 requires LINKEDIN_EMAIL and LINKEDIN_PASSWORD in .env"
             )
         return (
-            "Use browser tools only. (1) browser_navigate to https://www.linkedin.com/login . (2) browser_snapshot with depth 5+ "
-            'and a filename (e.g. "login.md") so the email and password textboxes appear. (3) Prefer ONE browser_fill_form call: '
-            'two "textbox" fields with name/type/ref/value, using refs for email and password from that same snapshot. '
-            "(4) If you cannot get both refs in one snapshot, use browser_type for email, then a NEW browser_snapshot, "
-            "then browser_type for password using only refs from the second snapshot. "
-            "(5) Click submit / Sign in. "
-            f"Credentials to enter: email {email!r} password {password!r}. "
-            "If you see captcha, checkpoint, or ref errors after a fresh snapshot, say so and stop. Do not use Jobs until logged in."
+            "Use browser tools only. (1) browser_navigate to https://www.linkedin.com/login . "
+            "(2) First use browser_fill_form once: two textbox fields, each with ref '_' plus a CSS selector (selector wins over ref). "
+            f'Email: selector input#username or input[name="session_key"], value {email!r}. '
+            f'Password: selector input#password or input[name="session_password"], value {password!r}. '
+            "(3) Click Sign in. If a selector matches no element, try the alternate and take browser_snapshot. "
+            "Do not use ref e19 for email when the snapshot shows e19 as a list—use selector-based fill instead. Stop on captcha."
         )
     return (
         "Use browser tools to open https://example.com and report the visible page title."
