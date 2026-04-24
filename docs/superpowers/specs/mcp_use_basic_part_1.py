@@ -16,13 +16,15 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # the schema expects real values. These hints reduce "invalid_type" / validation errors.
 _PLAYWRIGHT_TOOL_GUIDANCE = """
 When you call Playwright tools, match the tool schema exactly (no nulls for required fields):
-- browser_snapshot: ALWAYS pass BOTH "depth" (e.g. 3) and "filename" (e.g. "page.md") in the same call. Do not pass only "depth"—it will fail validation.
-- browser_click: ALWAYS include in one call: "element", "ref", "doubleClick": false, "button": "left", "modifiers": [].
-- Refs are NOT "ref-1" or "ref-2" (invalid). In the snapshot text, nodes look like `[ref=e12]` or `[ref=e5]`. You MUST set "ref" to that exact id (e.g. "e12", "e5") taken from the *latest* snapshot line for the control you want. Never invent or number refs.
-- If "ref not found", take a new browser_snapshot and pick a real [ref=...] from that output.
-- After each browser_click, read the tool result. If the Playwright code shows a click on the wrong target (e.g. getByRole 'LinkedIn' when you wanted Sign in), the ref was wrong—do not repeat; use browser_navigate to a direct URL instead.
+- browser_snapshot: ALWAYS pass BOTH "depth" (e.g. 3) and "filename" (e.g. "page.md") in the same call. For login pages use depth 5 or higher so text fields appear in the tree. Do not pass only "depth"—it will fail validation.
+- Stale refs: every [ref=e…] is tied to a specific snapshot. After ANY navigation, click, or browser_type, the DOM and refs can change. If browser_type or browser_click says "ref not found", you MUST run browser_snapshot again and use ONLY refs from that new output—never reuse an old ref (e.g. e28) from a prior snapshot.
+- Login forms: prefer browser_fill_form with a single "fields" array: fill all visible textbox fields in ONE tool call, each with type "textbox", using refs from the *same* browser_snapshot taken immediately before. That avoids the common bug of typing the email, then using an outdated ref for the password.
+- If you must use two browser_type steps: (1) snapshot, (2) type email, (3) new snapshot, (4) type password with ref from step 3 only.
+- browser_click: ALWAYS include "element", "ref", "doubleClick": false, "button": "left", "modifiers": [].
+- Refs: use exact ids from [ref=e12] style lines in the *latest* snapshot. Never invent refs.
+- If a click hit the wrong element, use browser_navigate to a direct URL instead of more bad clicks.
 - browser_evaluate: only {"function": "..."} with your JS string.
-On LinkedIn's guest home page, the logo link and the real "Sign in" control are easy to mix up; use https://www.linkedin.com/login to reach the login form without hunting refs on the homepage. Captchas and anti-bot can still block automation.
+LinkedIn login may use anti-bot, captchas, or iframes; automation often still cannot complete. Use /login for the form.
 """
 
 # Cheaper / smaller context models hit OpenAI rate limits (TPM) less often for long runs.
@@ -62,11 +64,14 @@ def _build_agent_task() -> str:
                 "USE_LINKEDIN_DEMO=1 requires LINKEDIN_EMAIL and LINKEDIN_PASSWORD in .env"
             )
         return (
-            "Use browser tools only. First browser_navigate to https://www.linkedin.com/login (required — do not try to find "
-            '"Sign in" on the homepage; those clicks often hit the wrong ref and activate the logo link). '
-            "Then browser_snapshot, fill the email and password fields on that page, submit the form. "
-            f"Email: {email} Password: {password}. "
-            "If you see captcha, security check, or cannot proceed, say so. Only after a successful login would Jobs search make sense; skip Jobs if not logged in."
+            "Use browser tools only. (1) browser_navigate to https://www.linkedin.com/login . (2) browser_snapshot with depth 5+ "
+            'and a filename (e.g. "login.md") so the email and password textboxes appear. (3) Prefer ONE browser_fill_form call: '
+            'two "textbox" fields with name/type/ref/value, using refs for email and password from that same snapshot. '
+            "(4) If you cannot get both refs in one snapshot, use browser_type for email, then a NEW browser_snapshot, "
+            "then browser_type for password using only refs from the second snapshot. "
+            "(5) Click submit / Sign in. "
+            f"Credentials to enter: email {email!r} password {password!r}. "
+            "If you see captcha, checkpoint, or ref errors after a fresh snapshot, say so and stop. Do not use Jobs until logged in."
         )
     return (
         "Use browser tools to open https://example.com and report the visible page title."
