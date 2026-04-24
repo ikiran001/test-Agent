@@ -21,8 +21,10 @@ When you call Playwright tools, match the tool schema exactly (no nulls for requ
 - On https://www.linkedin.com/login, prefer browser_fill_form with two fields in one call, using **selector** for each: email `input#username` or `input[name="session_key"]`, password `input#password` or `input[name="session_password"]`. Each field still needs a string "ref" in the schema; use placeholder "_" when using selector (the server uses selector when present).
 - browser_type: include "element", "ref" (or "_" with "selector"), "text", "submit": false, "slowly": false. You may set "selector" to target an input when aria-ref is wrong.
 - Stale refs: after navigation, take a new snapshot before another ref-based action.
-- browser_click: include "element", "ref", "doubleClick": false, "button": "left", "modifiers": [].
-- browser_evaluate: only {"function": "..."} with your JS string.
+- browser_click: include "element", "ref" (use "_" with "selector" if needed), "doubleClick": false, "button": "left", "modifiers": [].
+- On LinkedIn /login after filling fields, you must click the real **button** "Sign in" (snapshot line: `button "Sign in" [ref=…]`), not the page **heading** `heading "Sign in"` (different ref, not clickable as submit). Prefer browser_click with selector `button[type="submit"]` or the ref from the `button` line, not the heading line.
+- If the button will not click, try browser_press_key with key "Enter" (password field often still has focus after fill). Do not use browser_evaluate for submit unless the tool schema is satisfied; page-level eval only needs {"function": "..."} with no spurious null fields.
+- browser_evaluate: pass only the keys you need. For a page script: {"function": "() => { ... }"} — avoid nulls for element/ref/filename.
 Captchas / anti-bot may still block. Selector-based fill is more reliable than guessing e* on LinkedIn.
 """
 
@@ -64,11 +66,15 @@ def _build_agent_task() -> str:
             )
         return (
             "Use browser tools only. (1) browser_navigate to https://www.linkedin.com/login . "
-            "(2) First use browser_fill_form once: two textbox fields, each with ref '_' plus a CSS selector (selector wins over ref). "
-            f'Email: selector input#username or input[name="session_key"], value {email!r}. '
-            f'Password: selector input#password or input[name="session_password"], value {password!r}. '
-            "(3) Click Sign in. If a selector matches no element, try the alternate and take browser_snapshot. "
-            "Do not use ref e19 for email when the snapshot shows e19 as a list—use selector-based fill instead. Stop on captcha."
+            "(2) browser_fill_form once: two textbox fields, ref '_' + selector per field. "
+            f'Email: input#username or input[name="session_key"], value {email!r}. '
+            f'Password: input#password or input[name="session_password"], value {password!r}. '
+            "(3) browser_snapshot (depth 5+). (4) **Submit** the form: use browser_click on the **button** whose snapshot line is "
+            '`button "Sign in" [ref=e…]` (the blue submit control under the fields), with doubleClick false, button left, modifiers []. '
+            "Do **not** click the H1 `heading \"Sign in\"` — that is the title, not the submit action. "
+            "Alternative: browser_click with ref '_' and selector `button[type=\"submit\"]`. "
+            "(5) If the button does not work, use browser_press_key with key `Enter` to submit. "
+            "Stop on captcha. Do not use ref e19 for the email textbox (often a list in the header)."
         )
     return (
         "Use browser tools to open https://example.com and report the visible page title."
