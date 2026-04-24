@@ -16,11 +16,12 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # the schema expects real values. These hints reduce "invalid_type" / validation errors.
 _PLAYWRIGHT_TOOL_GUIDANCE = """
 When you call Playwright tools, match the tool schema exactly (no nulls for required fields):
-- browser_click: ALWAYS include "doubleClick": false, "button": "left", "modifiers": [] for a normal single click, plus "element" and "ref". Never guess refs.
-- Refs: copy the "ref" value EXACTLY from the *most recent* browser_snapshot text for the current page. If a click says "ref not found", call browser_snapshot again and use a ref that appears in the new output—do not reuse old ref IDs.
-- browser_snapshot: use "depth" and "filename" together (e.g. depth 3, "snap.md") when you need a saved snapshot; never pass nulls.
-- browser_evaluate: only use {"function": "..."} with your JS string. Do not add "element", "ref", or "filename" to browser_evaluate.
-If a call fails, fix the arguments and try again. Prefer fewer, smaller steps to save tokens.
+- browser_snapshot: ALWAYS pass BOTH "depth" (e.g. 3) and "filename" (e.g. "page.md") in the same call. Do not pass only "depth"—it will fail validation.
+- browser_click: ALWAYS include in one call: "element", "ref", "doubleClick": false, "button": "left", "modifiers": [].
+- Refs are NOT "ref-1" or "ref-2" (invalid). In the snapshot text, nodes look like `[ref=e12]` or `[ref=e5]`. You MUST set "ref" to that exact id (e.g. "e12", "e5") taken from the *latest* snapshot line for the control you want. Never invent or number refs.
+- If "ref not found", take a new browser_snapshot and pick a real [ref=...] from that output.
+- browser_evaluate: only {"function": "..."} with your JS string.
+LinkedIn and similar sites also use anti-bot rules; even correct automation may be blocked.
 """
 
 # Cheaper / smaller context models hit OpenAI rate limits (TPM) less often for long runs.
