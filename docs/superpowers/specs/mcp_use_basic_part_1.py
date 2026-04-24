@@ -41,11 +41,21 @@ def _build_agent_task() -> str:
 
 
 def _playwright_mcp_cmd():
-    """Prefer globally installed CLI; fall back to npx."""
+    """Prefer globally installed CLI; fall back to npx.
+
+    ``--isolated`` avoids: "Browser is already in use for ... mcp-chrome-..., use
+    --isolated" when **another** Playwright MCP is running (e.g. Cursor) and
+    would share the same on-disk profile. Disable with PLAYWRIGHT_MCP_NO_ISOLATED=1
+    if you need the shared profile for a single known setup.
+    """
+    extra: list[str] = []
+    if os.environ.get("PLAYWRIGHT_MCP_NO_ISOLATED", "").strip() != "1":
+        extra.append("--isolated")
+
     path = shutil.which("playwright-mcp")
     if path:
-        return path, []
-    return "npx", ["@playwright/mcp@latest"]
+        return path, extra
+    return "npx", ["@playwright/mcp@latest", *extra]
 
 
 def _kill_stale_playwright_mcp() -> None:
