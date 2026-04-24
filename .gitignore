@@ -17,3 +17,10 @@ node_modules/
 # Playwright MCP local data
 .playwright-mcp/
 **/.playwright-mcp/
+
+# Browser snapshot dumps from mcp_use runs (recreated each time)
+docs/superpowers/specs/linkedin*.md
+docs/superpowers/specs/jobs*.md
+docs/superpowers/specs/login.md
+docs/superpowers/specs/login2.md
+
