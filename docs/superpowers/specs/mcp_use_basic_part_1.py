@@ -23,6 +23,7 @@ When you call Playwright tools, match the tool schema exactly (no nulls for requ
 - Click the **button** "Sign in", not the H1 "Sign in" heading. Submit fallback: `browser_press_key` with "Enter" after focus on password, or `browser_run_code` with `async (page) => { await page.locator('button[type=submit]').first().click(); }` if allowed.
 - browser_evaluate: page-level only: {"function": "() => { ... }"} — do not add null element/ref/filename.
 - Stale refs: new snapshot after navigation before ref-based actions.
+- On linkedin.com/jobs, the *first* job in the *results* list (left rail) is the target, not a random card. After search, take a snapshot and click the first job **link**/title in that list, then Apply on the detail view.
 """
 
 # Cheaper / smaller context models hit OpenAI rate limits (TPM) less often for long runs.
@@ -63,13 +64,19 @@ def _build_agent_task() -> str:
             )
         return (
             "Use browser tools only. LinkedIn may show different login UIs; handle variants. "
-            "(1) browser_navigate to https://www.linkedin.com/login/ . "
+            "(1) browser_navigate to https://www.linkedin.com/checkpoint/rm/sign-in-another-account?fromSignIn=true&trk=guest_homepage-basic_nav-header-signin . "
             "(2) browser_fill_form: two fields, each with type textbox (exactly), ref \"_\", and a selector. "
             f"Values: email {email!r}, password {password!r}. "
             "If first selectors fail, retry fill_form with the next pair from the system instructions (#username, then session_key, then autocomplete, then type=email/password in main). "
             "(3) If every selector says no elements, one browser_snapshot (depth 6-8) then browser_type each field using refs from `textbox` lines only. "
             "(4) Submit: browser_click with a non-empty selector, e.g. `button[type=\"submit\"]`, and ref \"_\" plus doubleClick false, button left, modifiers []. Or browser_press_key Enter. "
-            "Never use only ref \"_\" without selector on browser_click. Never increase snapshot depth above 10. Stop on captcha."
+            "Never use only ref \"_\" without selector on browser_click. Never increase snapshot depth above 10. Stop on captcha. "
+            "After successful login, you MUST: "
+            "(5) Go to https://www.linkedin.com/jobs/ . "
+            "(6) In the main job search box, search for *SDET* (use browser_snapshot; try selectors like input.jobs-search-box__text-input, or textbox refs from the snapshot), then run the search. "
+            "(7) In the *left* job results list, open the **first** real job (top item—the first job **title** / card in the list, not an ad or promo). Use snapshot for refs, then click. "
+            "(8) On that job’s page only, use **Apply** or **Easy Apply** and continue that application until submitted or blocked. Do not pick a different job—the goal is the **very first** job in the list after the search. "
+            "If there is no Easy Apply, say so and stop."
         )
     return (
         "Use browser tools to open https://example.com and report the visible page title."
