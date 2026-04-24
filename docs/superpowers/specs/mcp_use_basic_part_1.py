@@ -20,8 +20,9 @@ When you call Playwright tools, match the tool schema exactly (no nulls for requ
 - browser_click: ALWAYS include in one call: "element", "ref", "doubleClick": false, "button": "left", "modifiers": [].
 - Refs are NOT "ref-1" or "ref-2" (invalid). In the snapshot text, nodes look like `[ref=e12]` or `[ref=e5]`. You MUST set "ref" to that exact id (e.g. "e12", "e5") taken from the *latest* snapshot line for the control you want. Never invent or number refs.
 - If "ref not found", take a new browser_snapshot and pick a real [ref=...] from that output.
+- After each browser_click, read the tool result. If the Playwright code shows a click on the wrong target (e.g. getByRole 'LinkedIn' when you wanted Sign in), the ref was wrong—do not repeat; use browser_navigate to a direct URL instead.
 - browser_evaluate: only {"function": "..."} with your JS string.
-LinkedIn and similar sites also use anti-bot rules; even correct automation may be blocked.
+On LinkedIn's guest home page, the logo link and the real "Sign in" control are easy to mix up; use https://www.linkedin.com/login to reach the login form without hunting refs on the homepage. Captchas and anti-bot can still block automation.
 """
 
 # Cheaper / smaller context models hit OpenAI rate limits (TPM) less often for long runs.
@@ -61,9 +62,11 @@ def _build_agent_task() -> str:
                 "USE_LINKEDIN_DEMO=1 requires LINKEDIN_EMAIL and LINKEDIN_PASSWORD in .env"
             )
         return (
-            "Use browser tools: open https://www.linkedin.com, Click on the sign in button, then sign in with this email and "
-            f"this password, then go to the Jobs area, search for SDET jobs, and summarize "
-            f"the first result (title and company). Email: {email} Password: {password}"
+            "Use browser tools only. First browser_navigate to https://www.linkedin.com/login (required — do not try to find "
+            '"Sign in" on the homepage; those clicks often hit the wrong ref and activate the logo link). '
+            "Then browser_snapshot, fill the email and password fields on that page, submit the form. "
+            f"Email: {email} Password: {password}. "
+            "If you see captcha, security check, or cannot proceed, say so. Only after a successful login would Jobs search make sense; skip Jobs if not logged in."
         )
     return (
         "Use browser tools to open https://example.com and report the visible page title."
