@@ -16,16 +16,13 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # the schema expects real values. These hints reduce "invalid_type" / validation errors.
 _PLAYWRIGHT_TOOL_GUIDANCE = """
 When you call Playwright tools, match the tool schema exactly (no nulls for required fields):
-- browser_snapshot: ALWAYS pass BOTH "depth" (e.g. 3) and "filename" in the same call. For login pages use depth 5+.
-- Wrong ref: refs like e19 are often a *list* or nav chrome, not an input. Only use a ref for browser_type if the snapshot line is clearly a textbox. If unsure, use a CSS *selector* instead.
-- On https://www.linkedin.com/login, prefer browser_fill_form with two fields in one call, using **selector** for each: email `input#username` or `input[name="session_key"]`, password `input#password` or `input[name="session_password"]`. Each field still needs a string "ref" in the schema; use placeholder "_" when using selector (the server uses selector when present).
-- browser_type: include "element", "ref" (or "_" with "selector"), "text", "submit": false, "slowly": false. You may set "selector" to target an input when aria-ref is wrong.
-- Stale refs: after navigation, take a new snapshot before another ref-based action.
-- browser_click: include "element", "ref" (use "_" with "selector" if needed), "doubleClick": false, "button": "left", "modifiers": [].
-- On LinkedIn /login after filling fields, you must click the real **button** "Sign in" (snapshot line: `button "Sign in" [ref=…]`), not the page **heading** `heading "Sign in"` (different ref, not clickable as submit). Prefer browser_click with selector `button[type="submit"]` or the ref from the `button` line, not the heading line.
-- If the button will not click, try browser_press_key with key "Enter" (password field often still has focus after fill). Do not use browser_evaluate for submit unless the tool schema is satisfied; page-level eval only needs {"function": "..."} with no spurious null fields.
-- browser_evaluate: pass only the keys you need. For a page script: {"function": "() => { ... }"} — avoid nulls for element/ref/filename.
-Captchas / anti-bot may still block. Selector-based fill is more reliable than guessing e* on LinkedIn.
+- browser_fill_form: each field "type" MUST be the exact string `textbox` (never "text" or "Text" — that causes validation errors).
+- browser_snapshot: always include "depth" and "filename". Use depth **between 4 and 10 only** on login pages. Do not raise depth past 10 (e.g. 100) — that wastes tokens and does not fix missing selectors.
+- LinkedIn A/B and layout changes: `input#username` may not exist in the DOM. Try **in order** (same fill_form, new attempt), each with ref "_" and type textbox: (1) `input#username` / `input#password` (2) `input[name="session_key"]` / `input[name="session_password"]` (3) `input[autocomplete="username"]` / `input[autocomplete="current-password"]` (4) `input[type="email"]` / `input[type="password"]` inside `main` if present: `main input[type=email]`, `main input[type=password]`. (5) If all selectors "match no elements", take **one** snapshot (depth 6-8) and use **browser_type** with the **ref** for each `textbox` line (Email/Password) from that snapshot, not a guessed ref.
+- browser_click: If using ref "_" as a placeholder, you MUST set a non-empty "selector" (CSS). If "selector" is empty or missing, the server treats ref "_" as a real aria ref and it **fails**. Example: `selector` `button[type="submit"]`, `ref` `_`, plus doubleClick false, button left, modifiers [].
+- Click the **button** "Sign in", not the H1 "Sign in" heading. Submit fallback: `browser_press_key` with "Enter" after focus on password, or `browser_run_code` with `async (page) => { await page.locator('button[type=submit]').first().click(); }` if allowed.
+- browser_evaluate: page-level only: {"function": "() => { ... }"} — do not add null element/ref/filename.
+- Stale refs: new snapshot after navigation before ref-based actions.
 """
 
 # Cheaper / smaller context models hit OpenAI rate limits (TPM) less often for long runs.
@@ -65,16 +62,14 @@ def _build_agent_task() -> str:
                 "USE_LINKEDIN_DEMO=1 requires LINKEDIN_EMAIL and LINKEDIN_PASSWORD in .env"
             )
         return (
-            "Use browser tools only. (1) browser_navigate to https://www.linkedin.com/login . "
-            "(2) browser_fill_form once: two textbox fields, ref '_' + selector per field. "
-            f'Email: input#username or input[name="session_key"], value {email!r}. '
-            f'Password: input#password or input[name="session_password"], value {password!r}. '
-            "(3) browser_snapshot (depth 5+). (4) **Submit** the form: use browser_click on the **button** whose snapshot line is "
-            '`button "Sign in" [ref=e…]` (the blue submit control under the fields), with doubleClick false, button left, modifiers []. '
-            "Do **not** click the H1 `heading \"Sign in\"` — that is the title, not the submit action. "
-            "Alternative: browser_click with ref '_' and selector `button[type=\"submit\"]`. "
-            "(5) If the button does not work, use browser_press_key with key `Enter` to submit. "
-            "Stop on captcha. Do not use ref e19 for the email textbox (often a list in the header)."
+            "Use browser tools only. LinkedIn may show different login UIs; handle variants. "
+            "(1) browser_navigate to https://www.linkedin.com/login/ . "
+            "(2) browser_fill_form: two fields, each with type textbox (exactly), ref \"_\", and a selector. "
+            f"Values: email {email!r}, password {password!r}. "
+            "If first selectors fail, retry fill_form with the next pair from the system instructions (#username, then session_key, then autocomplete, then type=email/password in main). "
+            "(3) If every selector says no elements, one browser_snapshot (depth 6-8) then browser_type each field using refs from `textbox` lines only. "
+            "(4) Submit: browser_click with a non-empty selector, e.g. `button[type=\"submit\"]`, and ref \"_\" plus doubleClick false, button left, modifiers []. Or browser_press_key Enter. "
+            "Never use only ref \"_\" without selector on browser_click. Never increase snapshot depth above 10. Stop on captcha."
         )
     return (
         "Use browser tools to open https://example.com and report the visible page title."
