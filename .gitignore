@@ -8,8 +8,12 @@
 venv/
 .venv/
 __pycache__/
+graphic_studio/log/
 *.py[cod]
 .Python
+
+# Local git worktrees (superpowers / parallel work)
+.worktrees/
 
 # Node
 node_modules/
@@ -21,6 +25,7 @@ node_modules/
 # Browser snapshot dumps from mcp_use runs (recreated each time)
 docs/superpowers/specs/linkedin*.md
 docs/superpowers/specs/jobs*.md
+docs/superpowers/specs/job-search-box*.md
 docs/superpowers/specs/login.md
 docs/superpowers/specs/login2.md
 
