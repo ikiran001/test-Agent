@@ -45,6 +45,26 @@ def _agent_max_steps() -> int:
     return max(5, int(os.environ.get("AGENT_MAX_STEPS", "50")))
 
 
+def _env_first_nonempty(*keys: str) -> str:
+    for k in keys:
+        raw = os.environ.get(k)
+        if raw is None:
+            continue
+        s = str(raw).strip()
+        if s:
+            return s
+    return ""
+
+
+def _credential_password(primary: str, fallback: str) -> str:
+    """Prefer primary env password; fallback if primary missing."""
+    if primary in os.environ and os.environ[primary]:
+        return str(os.environ[primary])
+    if fallback in os.environ and os.environ[fallback]:
+        return str(os.environ[fallback])
+    return ""
+
+
 def _build_agent_task() -> str:
     """Build the user task string from env. Source code must stay credential-free.
 
@@ -56,14 +76,22 @@ def _build_agent_task() -> str:
       manually and keep tasks to post-login steps only.
     """
     if os.environ.get("USE_UI_VERIFY", "0").strip() == "1":
-        login_url = (os.environ.get("APP_LOGIN_URL") or "").strip()
-        hosting_url = (os.environ.get("APP_HOSTING_VERIFY_URL") or "").strip()
-        email = (os.environ.get("APP_EMAIL") or "").strip()
-        password = os.environ.get("APP_PASSWORD") or ""
-        if not login_url or not hosting_url or not email or not password:
+        login_url = _env_first_nonempty("APP_LOGIN_URL", "BLUEHOST_LOGIN_URL")
+        hosting_url = _env_first_nonempty("APP_HOSTING_VERIFY_URL", "BLUEHOST_HOSTING_URL")
+        email = _env_first_nonempty("APP_EMAIL", "LINKEDIN_EMAIL")
+        password = _credential_password("APP_PASSWORD", "LINKEDIN_PASSWORD")
+        missing: list[str] = []
+        if not login_url:
+            missing.append("APP_LOGIN_URL (or BLUEHOST_LOGIN_URL)")
+        if not hosting_url:
+            missing.append("APP_HOSTING_VERIFY_URL (or BLUEHOST_HOSTING_URL)")
+        if not email:
+            missing.append("APP_EMAIL or LINKEDIN_EMAIL")
+        if not password:
+            missing.append("APP_PASSWORD or LINKEDIN_PASSWORD")
+        if missing:
             raise SystemExit(
-                "USE_UI_VERIFY=1 requires APP_LOGIN_URL, APP_HOSTING_VERIFY_URL, "
-                "APP_EMAIL, and APP_PASSWORD in .env"
+                "USE_UI_VERIFY=1 is missing: " + ", ".join(missing) + ". See .env.example."
             )
         return (
             "Use browser tools only — verify the Hosting UI; the browser runs headed so a human can watch. "
