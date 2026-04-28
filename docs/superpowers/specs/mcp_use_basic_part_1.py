@@ -16,14 +16,18 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 # the schema expects real values. These hints reduce "invalid_type" / validation errors.
 _PLAYWRIGHT_TOOL_GUIDANCE = """
 When you call Playwright tools, match the tool schema exactly (no nulls for required fields):
-- browser_fill_form: each field "type" MUST be the exact string `textbox` (never "text" or "Text" — that causes validation errors).
-- browser_snapshot: always include "depth" and "filename". Use depth **between 4 and 10 only** on login pages. Do not raise depth past 10 (e.g. 100) — that wastes tokens and does not fix missing selectors.
-- LinkedIn A/B and layout changes: `input#username` may not exist in the DOM. Try **in order** (same fill_form, new attempt), each with ref "_" and type textbox: (1) `input#username` / `input#password` (2) `input[name="session_key"]` / `input[name="session_password"]` (3) `input[autocomplete="username"]` / `input[autocomplete="current-password"]` (4) `input[type="email"]` / `input[type="password"]` inside `main` if present: `main input[type=email]`, `main input[type=password]`. (5) If all selectors "match no elements", take **one** snapshot (depth 6-8) and use **browser_type** with the **ref** for each `textbox` line (Email/Password) from that snapshot, not a guessed ref.
-- browser_click: If using ref "_" as a placeholder, you MUST set a non-empty "selector" (CSS). If "selector" is empty or missing, the server treats ref "_" as a real aria ref and it **fails**. Example: `selector` `button[type="submit"]`, `ref` `_`, plus doubleClick false, button left, modifiers [].
-- Click the **button** "Sign in", not the H1 "Sign in" heading. Submit fallback: `browser_press_key` with "Enter" after focus on password, or `browser_run_code` with `async (page) => { await page.locator('button[type=submit]').first().click(); }` if allowed.
-- browser_evaluate: page-level only: {"function": "() => { ... }"} — do not add null element/ref/filename.
-- Stale refs: new snapshot after navigation before ref-based actions.
-- On linkedin.com/jobs, the *first* job in the *results* list (left rail) is the target, not a random card. After search, take a snapshot and click the first job **link**/title in that list, then Apply on the detail view.
+- browser_fill_form: each field "type" MUST be `textbox` exactly.
+- browser_snapshot: include "depth" and "filename". On Bluehost login use depth **10–12** after overlays so textbox lines appear in YAML.
+- **browser_click** must include ALL of: **element** (human description string), **ref** (snapshot ref like `e104`, NOT a CSS string in ref), **selector** (CSS OR use ref with selector per server rules), **doubleClick** boolean, **button** one of `left`|`right`|`middle`, **modifiers** JSON array (often `[]`).
+  To click "Got It" cookie button from snapshot line `- button "Got It" [ref=e104]`: use element `Got It`, ref `e104`, doubleClick `false`, button `left`, modifiers `[]`. If your server requires selector with ref `_`, use selector `button:has-text("Got It")` ref `_` with the same doubleClick/button/modifiers.
+- Alternatively dismiss cookies with **browser_run_code** (must include **filename** string, e.g. `cookie.js`, plus **code** body): `async (page) => { await page.getByRole('button', { name: 'Got It' }).click({ timeout: 3000 }).catch(() => {}); }`
+- **browser_wait_for**: if the tool requires text/textGone strings, do NOT pass only time — use **browser_run_code** `async (page) => { await page.waitForTimeout(3000); }` for a plain pause (or wait for selector).
+- **browser_type:** pass **element**, **ref** from snapshot (e.g. textbox `e200`), **text**, **submit** boolean, **slowly** boolean — never null.
+- Bluehost: click **Hosting Login** tab before fields if Webmail is active — look for `Hosting Login` in snapshot and click that ref with full browser_click fields.
+- Cookie / tabs / navigation: take a **new snapshot** after each action.
+- LinkedIn-style selector fallback order for generic sites remains: session_key, autocomplete, etc., then fill_form.
+- browser_evaluate: page-only `{"function": "() => {}"}`.
+- linkedin.com/jobs: first job card in left list.
 """
 
 # Cheaper / smaller context models hit OpenAI rate limits (TPM) less often for long runs.
@@ -65,6 +69,14 @@ def _credential_password(primary: str, fallback: str) -> str:
     return ""
 
 
+def _credential_any(*keys: str) -> str:
+    """First non-empty password-like value from listed env keys."""
+    for k in keys:
+        if k in os.environ and str(os.environ[k]).strip():
+            return str(os.environ[k])
+    return ""
+
+
 def _build_agent_task() -> str:
     """Build the user task string from env. Source code must stay credential-free.
 
@@ -78,35 +90,47 @@ def _build_agent_task() -> str:
     if os.environ.get("USE_UI_VERIFY", "0").strip() == "1":
         login_url = _env_first_nonempty("APP_LOGIN_URL", "BLUEHOST_LOGIN_URL")
         hosting_url = _env_first_nonempty("APP_HOSTING_VERIFY_URL", "BLUEHOST_HOSTING_URL")
-        email = _env_first_nonempty("APP_EMAIL", "LINKEDIN_EMAIL")
-        password = _credential_password("APP_PASSWORD", "LINKEDIN_PASSWORD")
+        email = _env_first_nonempty(
+            "HOSTING_EMAIL",
+            "HOTING_EMAIL",  # common typo
+            "APP_EMAIL",
+            "LINKEDIN_EMAIL",
+            "hosting_email",  # allow lowercase .env keys
+        )
+        password = _credential_any(
+            "HOSTING_PASSWORD",
+            "APP_PASSWORD",
+            "LINKEDIN_PASSWORD",
+            "hosting_password",
+        )
         missing: list[str] = []
         if not login_url:
             missing.append("APP_LOGIN_URL (or BLUEHOST_LOGIN_URL)")
         if not hosting_url:
             missing.append("APP_HOSTING_VERIFY_URL (or BLUEHOST_HOSTING_URL)")
         if not email:
-            missing.append("APP_EMAIL or LINKEDIN_EMAIL")
+            missing.append("HOSTING_EMAIL (or APP_EMAIL or LINKEDIN_EMAIL)")
         if not password:
-            missing.append("APP_PASSWORD or LINKEDIN_PASSWORD")
+            missing.append("HOSTING_PASSWORD (or APP_PASSWORD or LINKEDIN_PASSWORD)")
         if missing:
             raise SystemExit(
                 "USE_UI_VERIFY=1 is missing: " + ", ".join(missing) + ". See .env.example."
             )
         return (
-            "Use browser tools only — verify the Hosting UI; the browser runs headed so a human can watch. "
-            "(1) browser_navigate to login: "
+            "Use browser tools only — verify Hosting UI; headed browser. Order: "
+            "(A) browser_navigate "
             f"{login_url!r}. "
-            "(2) browser_snapshot depth 8 filename hosting-login.yaml. "
-            "(3) browser_fill_form: two fields, type textbox exactly, ref \"_\", with CSS selectors. "
-            f"Values: email {email!r}, password {password!r}. "
-            "Retry alternate selectors per system hints if needed. "
-            "(4) Submit with browser_click using a non-empty CSS selector (e.g. button[type=submit]), ref \"_\", or Enter on password field. Stop on CAPTCHA/MFA/security challenge — describe what blocks you. "
-            "(5) After login succeeds, browser_navigate to Hosting page: "
+            "(B) browser_snapshot depth 11 filename hosting-s1.yaml. "
+            "(C) Cookie dialog: **browser_click** `Got It` using full args (element text, ref e106 or line from YAML, "
+            "doubleClick false, button left, modifiers []) OR selector `role=dialog >> button:has-text(\\\"Got It\\\")` ref `_`. "
+            "Snapshot hosting-s2.yaml. "
+            "(D) Click **Hosting Login** tab if needed (ref from YAML). Snapshot hosting-s3.yaml. "
+            "(E) Bluehost labels the first field **User ID** — use textbox refs from YAML (often e47 and e51 for password). "
+            f"Put {email!r} in User ID and password {password!r} in Password. browser_type: submit=false slowly=false. "
+            "(F) Click **Login** when enabled (snapshot ref); MFA/CAPTCHA ⇒ stop and describe. "
+            "(G) browser_navigate "
             f"{hosting_url!r}. "
-            "(6) browser_snapshot depth 10 filename hosting-dashboard.yaml. "
-            "(7) Final answer MUST list only observable facts: headings/titles for Hosting area; sidebar/state for Hosting nav; alert banners "
-            "(e.g. suspended, expired, renew) with wording seen in snapshots. Compare only to snapshots—do not invent UI."
+            "(H) browser_snapshot depth 11 filename hosting-dash.yaml; summarize Hosting headings/nav/alerts only from YAML."
         )
     if os.environ.get("USE_LINKEDIN_DEMO", "0").strip() == "1":
         email = (os.environ.get("LINKEDIN_EMAIL") or "").strip()
@@ -173,6 +197,9 @@ def _kill_stale_playwright_mcp() -> None:
 
 async def main():
     _kill_stale_playwright_mcp()
+    if os.environ.get("USE_UI_VERIFY", "").strip() == "1":
+        # Login + cookie/tab handling + dashboard needs more tool rounds than default.
+        os.environ.setdefault("AGENT_MAX_STEPS", "80")
 
     cmd, args = _playwright_mcp_cmd()
     # macOS/Windows: no Linux DISPLAY override

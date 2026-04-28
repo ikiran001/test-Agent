@@ -32,7 +32,7 @@ venv\Scripts\activate      # Windows
 
 
 ✅ 7. Hosted UI verification — headed browser (visible window while the agent runs)
-• Copy `.env.example` to `.env` and set OPENAI_API_KEY; for UI verify set USE_UI_VERIFY=1, APP_LOGIN_URL, APP_HOSTING_VERIFY_URL. You may use BLUEHOST_LOGIN_URL / BLUEHOST_HOSTING_URL instead of APP_* URLs. Email/password: APP_EMAIL / APP_PASSWORD — or leave them empty and set LINKEDIN_EMAIL / LINKEDIN_PASSWORD (fallback for convenience).
+• Copy `.env.example` to `.env` and set OPENAI_API_KEY; for UI verify set USE_UI_VERIFY=1, APP_LOGIN_URL, APP_HOSTING_VERIFY_URL. Credentials: **HOSTING_EMAIL** / **HOSTING_PASSWORD** (preferred for Hosting login), or APP_*, or LINKEDIN_* as fallbacks. URLs may use BLUEHOST_* aliases.
 • Visible browser is the default. Set PLAYWRIGHT_MCP_HEADLESS=1 only if you truly need invisible headless runs.
 • From this folder: USE_UI_VERIFY=1 python3 mcp_use_basic_part_1.py
 • Values used in login can reach your LLM provider — use disposable test accounts only.
