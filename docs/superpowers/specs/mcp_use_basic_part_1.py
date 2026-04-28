@@ -55,6 +55,31 @@ def _build_agent_task() -> str:
       passwords for production-style automation. Prefer a safe smoke test, or log in
       manually and keep tasks to post-login steps only.
     """
+    if os.environ.get("USE_UI_VERIFY", "0").strip() == "1":
+        login_url = (os.environ.get("APP_LOGIN_URL") or "").strip()
+        hosting_url = (os.environ.get("APP_HOSTING_VERIFY_URL") or "").strip()
+        email = (os.environ.get("APP_EMAIL") or "").strip()
+        password = os.environ.get("APP_PASSWORD") or ""
+        if not login_url or not hosting_url or not email or not password:
+            raise SystemExit(
+                "USE_UI_VERIFY=1 requires APP_LOGIN_URL, APP_HOSTING_VERIFY_URL, "
+                "APP_EMAIL, and APP_PASSWORD in .env"
+            )
+        return (
+            "Use browser tools only — verify the Hosting UI; the browser runs headed so a human can watch. "
+            "(1) browser_navigate to login: "
+            f"{login_url!r}. "
+            "(2) browser_snapshot depth 8 filename hosting-login.yaml. "
+            "(3) browser_fill_form: two fields, type textbox exactly, ref \"_\", with CSS selectors. "
+            f"Values: email {email!r}, password {password!r}. "
+            "Retry alternate selectors per system hints if needed. "
+            "(4) Submit with browser_click using a non-empty CSS selector (e.g. button[type=submit]), ref \"_\", or Enter on password field. Stop on CAPTCHA/MFA/security challenge — describe what blocks you. "
+            "(5) After login succeeds, browser_navigate to Hosting page: "
+            f"{hosting_url!r}. "
+            "(6) browser_snapshot depth 10 filename hosting-dashboard.yaml. "
+            "(7) Final answer MUST list only observable facts: headings/titles for Hosting area; sidebar/state for Hosting nav; alert banners "
+            "(e.g. suspended, expired, renew) with wording seen in snapshots. Compare only to snapshots—do not invent UI."
+        )
     if os.environ.get("USE_LINKEDIN_DEMO", "0").strip() == "1":
         email = (os.environ.get("LINKEDIN_EMAIL") or "").strip()
         password = os.environ.get("LINKEDIN_PASSWORD") or ""
@@ -94,6 +119,9 @@ def _playwright_mcp_cmd():
     extra: list[str] = []
     if os.environ.get("PLAYWRIGHT_MCP_NO_ISOLATED", "").strip() != "1":
         extra.append("--isolated")
+    # Default is HEADED (visible browser). Set PLAYWRIGHT_MCP_HEADLESS=1 only for unattended runs.
+    if os.environ.get("PLAYWRIGHT_MCP_HEADLESS", "").strip() == "1":
+        extra.append("--headless")
 
     path = shutil.which("playwright-mcp")
     if path:

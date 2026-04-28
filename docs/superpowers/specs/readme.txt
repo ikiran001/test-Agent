@@ -29,3 +29,10 @@ setx OPENAI_API_KEY "your_key"
 python3 -m venv venv
 source venv/bin/activate   # Mac/Linux
 venv\Scripts\activate      # Windows
+
+
+✅ 7. Hosted UI verification — headed browser (visible window while the agent runs)
+• Copy `.env.example` to `.env` and set OPENAI_API_KEY, USE_UI_VERIFY=1, APP_LOGIN_URL, APP_HOSTING_VERIFY_URL, APP_EMAIL, APP_PASSWORD.
+• Visible browser is the default. Set PLAYWRIGHT_MCP_HEADLESS=1 only if you truly need invisible headless runs.
+• From this folder: USE_UI_VERIFY=1 python3 mcp_use_basic_part_1.py
+• Values used in login can reach your LLM provider — use disposable test accounts only.
