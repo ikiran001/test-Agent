@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from jira_qa_agent.bitbucket_pr import PRRef
-from jira_qa_agent.cli import _discover_pr_ref, _pick_pr
+from jira_qa_agent.cli import _discover_pr_ref, _pick_pr, _pick_prs
 
 
 _DC_PR_1 = PRRef(kind="dc", project_or_workspace="NDP", repo_slug="nd-mfe", pr_id=1, dc_base_url="https://stash.x.com")
@@ -18,7 +18,39 @@ def _make_settings(server_url="https://stash.x.com"):
     return s
 
 
-# --- _pick_pr tests ---
+# --- _pick_prs tests (multi-select) ---
+
+def test_pick_prs_default_selects_first(capsys):
+    with patch("builtins.input", return_value=""):
+        result = _pick_prs([_DC_PR_1, _DC_PR_2])
+    assert result == [_DC_PR_1]
+
+
+def test_pick_prs_selects_second(capsys):
+    with patch("builtins.input", return_value="2"):
+        result = _pick_prs([_DC_PR_1, _DC_PR_2])
+    assert result == [_DC_PR_2]
+
+
+def test_pick_prs_selects_multiple(capsys):
+    with patch("builtins.input", return_value="1,2"):
+        result = _pick_prs([_DC_PR_1, _DC_PR_2])
+    assert result == [_DC_PR_1, _DC_PR_2]
+
+
+def test_pick_prs_all_keyword(capsys):
+    with patch("builtins.input", return_value="all"):
+        result = _pick_prs([_DC_PR_1, _DC_PR_2])
+    assert result == [_DC_PR_1, _DC_PR_2]
+
+
+def test_pick_prs_invalid_then_valid(capsys):
+    with patch("builtins.input", side_effect=["0", "5", "1"]):
+        result = _pick_prs([_DC_PR_1, _DC_PR_2])
+    assert result == [_DC_PR_1]
+
+
+# --- _pick_pr backward-compat shim ---
 
 def test_pick_pr_default_selects_first(capsys):
     with patch("builtins.input", return_value=""):
@@ -44,8 +76,8 @@ def test_discover_uses_pr_arg_directly():
     settings = _make_settings()
     jc = MagicMock()
     result = _discover_pr_ref("NDP/nd-mfe#42", "some blob", jc, "SOFT-1", "123", settings)
-    assert result.pr_id == 42
-    assert result.kind == "dc"
+    assert result[0].pr_id == 42
+    assert result[0].kind == "dc"
     jc.get_dev_status_prs.assert_not_called()
     jc.get_remote_links.assert_not_called()
 
@@ -66,7 +98,7 @@ def test_discover_uses_dev_status_api():
         "https://stash.x.com/projects/NDP/repos/nd-mfe/pull-requests/99"
     ]
     result = _discover_pr_ref(None, "no pr refs here", jc, "SOFT-1", "4756346", settings)
-    assert result.pr_id == 99
+    assert result[0].pr_id == 99
     jc.get_remote_links.assert_not_called()
 
 
@@ -83,7 +115,7 @@ def test_discover_falls_back_to_remote_links():
         }
     ]
     result = _discover_pr_ref(None, "no pr refs here", jc, "SOFT-1", "123", settings)
-    assert result.pr_id == 99
+    assert result[0].pr_id == 99
 
 
 # --- _discover_pr_ref: Stage 3 (text scan fallback) ---
@@ -95,7 +127,7 @@ def test_discover_falls_back_to_text_scan():
     jc.get_remote_links.return_value = []
     blob = "See https://stash.x.com/projects/NDP/repos/nd-mfe/pull-requests/77 for context"
     result = _discover_pr_ref(None, blob, jc, "SOFT-1", "123", settings)
-    assert result.pr_id == 77
+    assert result[0].pr_id == 77
 
 
 # --- _discover_pr_ref: no PR found ---

@@ -66,23 +66,49 @@ def _fetch_bb_diff(settings: Settings, ref: PRRef) -> str:
     )
 
 
-def _pick_pr(refs: list[PRRef]) -> PRRef:
-    """Print a numbered menu and return the user's chosen PRRef."""
-    print(f"\nFound {len(refs)} PRs:")
+def _pick_prs(refs: list[PRRef]) -> list[PRRef]:
+    """Print a numbered menu and return the user's chosen PRRefs.
+
+    Supports single selection (1), comma-separated (1,3), or 'all'.
+    """
+    print(f"\nFound {len(refs)} PRs linked to this ticket:")
     for i, r in enumerate(refs, 1):
         base = f"  ({r.dc_base_url})" if r.kind == "dc" else "  (bitbucket.org)"
         print(f"  [{i}]  {r.kind}  {r.project_or_workspace} / {r.repo_slug}  #{r.pr_id}{base}")
+    print()
     while True:
         try:
-            raw = input(f"Pick a PR to analyse [1-{len(refs)}] (default 1): ").strip()
+            raw = input(
+                f"Select PR(s) to analyse — single number, comma-separated (e.g. 1,3), "
+                f"or 'all' [1-{len(refs)}, default 1]: "
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             print("\nAborted.")
             sys.exit(0)
         if raw == "":
-            return refs[0]
-        if raw.isdigit() and 1 <= int(raw) <= len(refs):
-            return refs[int(raw) - 1]
-        print(f"Please enter a number between 1 and {len(refs)}.")
+            return [refs[0]]
+        if raw.lower() in ("all", "a"):
+            return list(refs)
+        parts = [p.strip() for p in raw.split(",")]
+        chosen: list[PRRef] = []
+        valid = True
+        for p in parts:
+            if p.isdigit() and 1 <= int(p) <= len(refs):
+                r = refs[int(p) - 1]
+                if r not in chosen:
+                    chosen.append(r)
+            else:
+                print(f"  '{p}' is not valid — enter numbers between 1 and {len(refs)}.")
+                valid = False
+                break
+        if valid and chosen:
+            return chosen
+
+
+# Keep old name as alias so existing callers that import _pick_pr still work
+def _pick_pr(refs: list[PRRef]) -> PRRef:
+    """Single-selection wrapper kept for backward compatibility with tests."""
+    return _pick_prs(refs)[0]
 
 
 def _discover_pr_ref(
@@ -92,13 +118,13 @@ def _discover_pr_ref(
     issue_key: str,
     issue_id: str,
     settings: Settings,
-) -> PRRef:
+) -> list[PRRef]:
     """
     Three-stage PR discovery:
       1. --pr flag (manual, highest priority)
       2. Jira dev-status API (the Development panel) + remote links API
       3. Regex scan of ticket text (description + comments)
-    Returns a single PRRef (prompts user if multiple found).
+    Returns a list of PRRefs (prompts user to pick when multiple found).
     Exits with a clear message if nothing is found.
     """
     server_url = settings.bitbucket_server_base_url
@@ -111,7 +137,7 @@ def _discover_pr_ref(
                 f"Could not parse --pr value: {pr_arg!r}\n"
                 "Expected formats: PROJECT/repo#123 (DC), workspace/repo#123 (Cloud), or a full pull-request URL."
             )
-        return ref
+        return [ref]
 
     # Stage 2: Jira dev-status API (Development panel) + remote links
     print(f"Looking for linked PRs on {issue_key} via Jira Development panel...")
@@ -141,9 +167,9 @@ def _discover_pr_ref(
             else f"bitbucket.org/{r.project_or_workspace}/{r.repo_slug}#{r.pr_id}"
         )
         print(f"Auto-detected PR: {loc} — proceeding...")
-        return r
+        return [r]
 
-    return _pick_pr(refs)
+    return _pick_prs(refs)
 
 
 def _review_loop(
@@ -250,17 +276,24 @@ def main(argv: list[str] | None = None) -> None:
         blob_parts.append(args.pr)
     blob = "\n".join(blob_parts)
 
-    parsed = _discover_pr_ref(args.pr, blob, jc, args.issue_key, issue["id"], settings)
+    selected_refs = _discover_pr_ref(args.pr, blob, jc, args.issue_key, issue["id"], settings)
 
-    loc = (
-        f"{parsed.dc_base_url}/projects/{parsed.project_or_workspace}"
-        f"/repos/{parsed.repo_slug}/pull-requests/{parsed.pr_id}"
-        if parsed.kind == "dc"
-        else f"{parsed.project_or_workspace}/{parsed.repo_slug}#{parsed.pr_id} (Cloud)"
-    )
-    print(f"Fetching PR diff from Bitbucket ({parsed.kind}): {loc} ...")
-    diff = _fetch_bb_diff(settings, parsed)
-    print(f"Diff fetched ({len(diff):,} chars). Running LLM analysis...")
+    pr_sections: list[str] = []
+    pr_labels: list[str] = []
+    for ref in selected_refs:
+        loc = (
+            f"{ref.dc_base_url}/projects/{ref.project_or_workspace}"
+            f"/repos/{ref.repo_slug}/pull-requests/{ref.pr_id}"
+            if ref.kind == "dc"
+            else f"{ref.project_or_workspace}/{ref.repo_slug}#{ref.pr_id} (Cloud)"
+        )
+        print(f"Fetching PR diff from Bitbucket ({ref.kind}): {loc} ...")
+        diff = _fetch_bb_diff(settings, ref)
+        print(f"  Diff fetched ({len(diff):,} chars).")
+        pr_sections.append(f"Bitbucket PR ({ref.kind}) {loc}\nDiff:\n{diff}")
+        pr_labels.append(loc)
+
+    print("Running LLM analysis...")
 
     bundle = f"""JIRA {args.issue_key}
 Summary: {summary}
@@ -271,9 +304,7 @@ Description:
 Comments:
 {chr(10).join(comment_lines)}
 
-Bitbucket PR ({parsed.kind}) {loc}
-Diff:
-{diff}
+{chr(10).join(pr_sections)}
 """
 
     llm = ChatOpenAI(model=settings.openai_model, temperature=0)
@@ -281,9 +312,10 @@ Diff:
 
     # Build ADF and post
     sections = sections_from_markdown(report_md)
+    pr_list = ", ".join(pr_labels)
     preamble = (
         "Automation note",
-        f"Generated from Bitbucket ({parsed.kind}) PR via jira_qa_agent.",
+        f"Generated from {len(selected_refs)} Bitbucket PR(s) via jira_qa_agent: {pr_list}",
     )
     adf = adf_doc_from_sections([preamble, *sections])
     jc.add_comment(args.issue_key, adf)
