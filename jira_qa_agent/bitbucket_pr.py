@@ -88,11 +88,11 @@ def parse_pr_ref(text: str, *, server_base_url: str | None = None) -> PRRef | No
 
 
 def _dedup(refs: list[PRRef]) -> list[PRRef]:
-    """Remove duplicate PRRefs keeping first occurrence, keyed on (project, repo, pr_id)."""
-    seen: set[tuple[str, str, int]] = set()
+    """Remove duplicate PRRefs keeping first occurrence, keyed on (project, repo, pr_id, dc_base_url)."""
+    seen: set[tuple[str, str, int, str]] = set()
     out: list[PRRef] = []
     for r in refs:
-        key = (r.project_or_workspace, r.repo_slug, r.pr_id)
+        key = (r.project_or_workspace, r.repo_slug, r.pr_id, r.dc_base_url or "")
         if key not in seen:
             seen.add(key)
             out.append(r)
