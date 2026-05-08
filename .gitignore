@@ -11,6 +11,10 @@ __pycache__/
 *.py[cod]
 .Python
 
+# Test/IDE artifacts
+log/
+.pytest_cache/
+
 # Node
 node_modules/
 
