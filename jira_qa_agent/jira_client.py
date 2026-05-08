@@ -7,7 +7,8 @@ import httpx
 
 class JiraClient:
     def __init__(self, host: str, email: str, api_token: str) -> None:
-        self._base = f"{host.rstrip('/')}/rest/api/3"
+        self._host = host.rstrip("/")
+        self._base = f"{self._host}/rest/api/3"
         self._auth = (email, api_token)
 
     def get_issue(self, key: str) -> dict[str, Any]:
@@ -24,6 +25,33 @@ class JiraClient:
             r = c.get(f"{self._base}/issue/{key}/comment")
             r.raise_for_status()
             return list(r.json().get("comments") or [])
+
+    def get_dev_status_prs(self, issue_id: str) -> list[str]:
+        """
+        Returns PR URLs from Jira's Development panel (dev-status API).
+        This is the authoritative source for the 'Development' section shown on Jira tickets.
+        Requires the numeric issue ID (issue["id"]), not the key.
+        Returns an empty list on any non-200 response or missing data.
+        """
+        url = f"{self._host}/rest/dev-status/1.0/issue/detail"
+        with httpx.Client(auth=self._auth, timeout=30.0) as c:
+            r = c.get(
+                url,
+                params={
+                    "issueId": issue_id,
+                    "applicationType": "stash",
+                    "dataType": "pullrequest",
+                },
+            )
+            if r.status_code != 200:
+                return []
+            pr_urls: list[str] = []
+            for detail in (r.json().get("detail") or []):
+                for pr in (detail.get("pullRequests") or []):
+                    u = pr.get("url")
+                    if u:
+                        pr_urls.append(u)
+            return pr_urls
 
     def get_remote_links(self, key: str) -> list[dict]:
         """

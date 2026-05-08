@@ -43,9 +43,10 @@ def test_pick_pr_invalid_then_valid(capsys):
 def test_discover_uses_pr_arg_directly():
     settings = _make_settings()
     jc = MagicMock()
-    result = _discover_pr_ref("NDP/nd-mfe#42", "some blob", jc, "SOFT-1", settings)
+    result = _discover_pr_ref("NDP/nd-mfe#42", "some blob", jc, "SOFT-1", "123", settings)
     assert result.pr_id == 42
     assert result.kind == "dc"
+    jc.get_dev_status_prs.assert_not_called()
     jc.get_remote_links.assert_not_called()
 
 
@@ -53,14 +54,26 @@ def test_discover_exits_on_unparseable_pr_arg():
     settings = _make_settings(server_url=None)
     jc = MagicMock()
     with pytest.raises(SystemExit, match="Could not parse"):
-        _discover_pr_ref("not-a-pr-ref", "blob", jc, "SOFT-1", settings)
+        _discover_pr_ref("not-a-pr-ref", "blob", jc, "SOFT-1", "123", settings)
 
 
-# --- _discover_pr_ref: Stage 2 (remote links) ---
+# --- _discover_pr_ref: Stage 2 (dev-status API) ---
 
-def test_discover_uses_remote_links():
+def test_discover_uses_dev_status_api():
     settings = _make_settings()
     jc = MagicMock()
+    jc.get_dev_status_prs.return_value = [
+        "https://stash.x.com/projects/NDP/repos/nd-mfe/pull-requests/99"
+    ]
+    result = _discover_pr_ref(None, "no pr refs here", jc, "SOFT-1", "4756346", settings)
+    assert result.pr_id == 99
+    jc.get_remote_links.assert_not_called()
+
+
+def test_discover_falls_back_to_remote_links():
+    settings = _make_settings()
+    jc = MagicMock()
+    jc.get_dev_status_prs.return_value = []
     jc.get_remote_links.return_value = [
         {
             "object": {
@@ -69,7 +82,7 @@ def test_discover_uses_remote_links():
             }
         }
     ]
-    result = _discover_pr_ref(None, "no pr refs here", jc, "SOFT-1", settings)
+    result = _discover_pr_ref(None, "no pr refs here", jc, "SOFT-1", "123", settings)
     assert result.pr_id == 99
 
 
@@ -78,9 +91,10 @@ def test_discover_uses_remote_links():
 def test_discover_falls_back_to_text_scan():
     settings = _make_settings()
     jc = MagicMock()
+    jc.get_dev_status_prs.return_value = []
     jc.get_remote_links.return_value = []
     blob = "See https://stash.x.com/projects/NDP/repos/nd-mfe/pull-requests/77 for context"
-    result = _discover_pr_ref(None, blob, jc, "SOFT-1", settings)
+    result = _discover_pr_ref(None, blob, jc, "SOFT-1", "123", settings)
     assert result.pr_id == 77
 
 
@@ -89,6 +103,7 @@ def test_discover_falls_back_to_text_scan():
 def test_discover_exits_when_nothing_found():
     settings = _make_settings(server_url=None)
     jc = MagicMock()
+    jc.get_dev_status_prs.return_value = []
     jc.get_remote_links.return_value = []
     with pytest.raises(SystemExit, match="No Bitbucket PR found"):
-        _discover_pr_ref(None, "no links here", jc, "SOFT-1", settings)
+        _discover_pr_ref(None, "no links here", jc, "SOFT-1", "123", settings)

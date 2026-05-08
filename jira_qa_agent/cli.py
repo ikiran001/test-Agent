@@ -90,12 +90,13 @@ def _discover_pr_ref(
     blob: str,
     jc: JiraClient,
     issue_key: str,
+    issue_id: str,
     settings: Settings,
 ) -> PRRef:
     """
     Three-stage PR discovery:
       1. --pr flag (manual, highest priority)
-      2. Jira remote links API
+      2. Jira dev-status API (the Development panel) + remote links API
       3. Regex scan of ticket text (description + comments)
     Returns a single PRRef (prompts user if multiple found).
     Exits with a clear message if nothing is found.
@@ -112,14 +113,18 @@ def _discover_pr_ref(
             )
         return ref
 
-    # Stage 2: Jira remote links
-    print(f"Looking for linked PRs on {issue_key} via Jira remote links...")
-    links = jc.get_remote_links(issue_key)
-    refs = extract_pr_refs_from_remote_links(links, server_base_url=server_url)
+    # Stage 2: Jira dev-status API (Development panel) + remote links
+    print(f"Looking for linked PRs on {issue_key} via Jira Development panel...")
+    dev_urls = jc.get_dev_status_prs(issue_id)
+    refs = [r for u in dev_urls for r in [parse_pr_ref(u, server_base_url=server_url)] if r]
+
+    if not refs:
+        links = jc.get_remote_links(issue_key)
+        refs = extract_pr_refs_from_remote_links(links, server_base_url=server_url)
 
     # Stage 3: text scan fallback
     if not refs:
-        print("No remote links found — scanning ticket text for PR references...")
+        print("No linked PRs found — scanning ticket text for PR references...")
         refs = extract_pr_refs_from_text(blob, server_base_url=server_url)
 
     if not refs:
@@ -242,7 +247,7 @@ def main(argv: list[str] | None = None) -> None:
         blob_parts.append(args.pr)
     blob = "\n".join(blob_parts)
 
-    parsed = _discover_pr_ref(args.pr, blob, jc, args.issue_key, settings)
+    parsed = _discover_pr_ref(args.pr, blob, jc, args.issue_key, issue["id"], settings)
 
     loc = (
         f"{parsed.dc_base_url}/projects/{parsed.project_or_workspace}"
