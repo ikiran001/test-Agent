@@ -151,6 +151,7 @@ def _review_loop(
     summary: str,
     bundle: str,
     llm: ChatOpenAI,
+    issue_type: str,
     no_confirm: bool,
 ) -> str:
     """
@@ -158,12 +159,13 @@ def _review_loop(
     If the user provides feedback, regenerate with that feedback appended.
     Returns the final approved report markdown.
     """
-    report_md = build_test_report(llm, bundle)
+    report_md = build_test_report(llm, bundle, issue_type=issue_type)
 
     while True:
         print()
         print(_DIVIDER)
         print(f"  GENERATED TEST REPORT — {issue_key}: {summary}")
+        print(f"  Issue type: {issue_type or 'Unknown (using default prompt)'}")
         print(_DIVIDER)
         print(report_md)
         print(_DIVIDER)
@@ -199,7 +201,7 @@ def _review_loop(
             + f"\n\n---\nUser feedback on previous report (please revise accordingly):\n{answer}\n"
             + f"\nPrevious report (revise this):\n{report_md}\n"
         )
-        report_md = build_test_report(llm, feedback_bundle)
+        report_md = build_test_report(llm, feedback_bundle, issue_type=issue_type)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -232,6 +234,7 @@ def main(argv: list[str] | None = None) -> None:
     issue = jc.get_issue(args.issue_key)
     fields = issue.get("fields") or {}
     summary = str(fields.get("summary") or "")
+    issue_type = str((fields.get("issuetype") or {}).get("name") or "")
     desc = fields.get("description")
     desc_text = plain_text_from_adf(desc) if isinstance(desc, dict) else str(desc or "")
 
@@ -274,7 +277,7 @@ Diff:
 """
 
     llm = ChatOpenAI(model=settings.openai_model, temperature=0)
-    report_md = _review_loop(args.issue_key, summary, bundle, llm, no_confirm=args.yes)
+    report_md = _review_loop(args.issue_key, summary, bundle, llm, issue_type, no_confirm=args.yes)
 
     # Build ADF and post
     sections = sections_from_markdown(report_md)
