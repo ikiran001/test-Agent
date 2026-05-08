@@ -21,6 +21,10 @@ from jira_qa_agent.config import Settings, load_settings
 from jira_qa_agent.jira_client import JiraClient
 
 _DIVIDER = "=" * 70
+# Approximate character budget for all PR diffs combined.
+# ~4 chars per token, 30K TPM limit → ~120K chars total.
+# We reserve ~30K chars for ticket text + prompt, so 90K for diffs.
+_MAX_TOTAL_DIFF_CHARS = 90_000
 
 
 def _load_dotenv() -> None:
@@ -37,7 +41,8 @@ def _load_dotenv() -> None:
     load_dotenv(override=True)
 
 
-def _fetch_bb_diff(settings: Settings, ref: PRRef) -> str:
+def _fetch_bb_diff(settings: Settings, ref: PRRef, max_chars: int | None = None) -> str:
+    limit = max_chars if max_chars is not None else settings.max_diff_chars
     auth_kw = dict(
         username=settings.bitbucket_username,
         password=settings.bitbucket_app_password,
@@ -54,14 +59,14 @@ def _fetch_bb_diff(settings: Settings, ref: PRRef) -> str:
             ref.project_or_workspace,
             ref.repo_slug,
             ref.pr_id,
-            settings.max_diff_chars,
+            limit,
             **auth_kw,
         )
     return fetch_pr_diff_cloud(
         ref.project_or_workspace,
         ref.repo_slug,
         ref.pr_id,
-        settings.max_diff_chars,
+        limit,
         **auth_kw,
     )
 
@@ -278,6 +283,15 @@ def main(argv: list[str] | None = None) -> None:
 
     selected_refs = _discover_pr_ref(args.pr, blob, jc, args.issue_key, issue["id"], settings)
 
+    n_prs = len(selected_refs)
+    per_pr_limit = min(settings.max_diff_chars, _MAX_TOTAL_DIFF_CHARS // n_prs)
+    if n_prs > 1 and per_pr_limit < settings.max_diff_chars:
+        print(
+            f"Note: {n_prs} PRs selected — capping each diff at "
+            f"{per_pr_limit:,} chars (total budget {_MAX_TOTAL_DIFF_CHARS:,} chars) "
+            f"to stay within LLM token limits."
+        )
+
     pr_sections: list[str] = []
     pr_labels: list[str] = []
     for ref in selected_refs:
@@ -288,7 +302,7 @@ def main(argv: list[str] | None = None) -> None:
             else f"{ref.project_or_workspace}/{ref.repo_slug}#{ref.pr_id} (Cloud)"
         )
         print(f"Fetching PR diff from Bitbucket ({ref.kind}): {loc} ...")
-        diff = _fetch_bb_diff(settings, ref)
+        diff = _fetch_bb_diff(settings, ref, max_chars=per_pr_limit)
         print(f"  Diff fetched ({len(diff):,} chars).")
         pr_sections.append(f"Bitbucket PR ({ref.kind}) {loc}\nDiff:\n{diff}")
         pr_labels.append(loc)
