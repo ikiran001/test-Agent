@@ -7,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
-from jira_qa_agent.adf import adf_doc_from_sections, plain_text_from_adf
+from jira_qa_agent.adf import adf_doc_from_report, plain_text_from_adf
 from jira_qa_agent.analyze import build_test_report, sections_from_markdown
 from jira_qa_agent.bitbucket_pr import (
     PRRef,
@@ -326,11 +326,6 @@ Comments:
 
     # Build ADF and post
     sections = sections_from_markdown(report_md)
-    pr_list = ", ".join(pr_labels)
-    preamble = (
-        "Automation note",
-        f"Generated from {len(selected_refs)} Bitbucket PR(s) via jira_qa_agent: {pr_list}",
-    )
-    adf = adf_doc_from_sections([preamble, *sections])
+    adf = adf_doc_from_report(sections)
     jc.add_comment(args.issue_key, adf)
     print(f"\nPosted test plan comment on {args.issue_key}.")
