@@ -47,7 +47,7 @@ def load_settings() -> Settings:
         bitbucket_app_password=bb_pw,
         bitbucket_access_token=bearer,
         bitbucket_server_base_url=_strip_or_none("BITBUCKET_SERVER_URL"),
-        openai_model=(os.environ.get("OPENAI_MODEL") or "gpt-4.1").strip(),
+        openai_model=(os.environ.get("OPENAI_MODEL") or "gpt-4o-mini").strip(),
         max_diff_chars=int(os.environ.get("JIRA_QA_MAX_DIFF_CHARS", "120000")),
     )
 

@@ -32,7 +32,7 @@ Bitbucket — Cloud OR Data Center / Server
     BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD  — username + HTTP access token / PAT
 
 Optional:
-  OPENAI_MODEL          — default: gpt-4.1
+  OPENAI_MODEL          — default: gpt-4o-mini
   JIRA_QA_MAX_DIFF_CHARS — default: 120000 (per PR; auto-scaled down for multi-PR)
 
 Run
