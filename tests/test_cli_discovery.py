@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from jira_qa_agent.bitbucket_pr import PRRef
-from jira_qa_agent.cli import _discover_pr_ref, _pick_pr, _pick_prs
+from jira_qa_agent.cli import _discover_pr_ref, _pick_pr, _pick_prs, skip_review_before_post
 
 
 _DC_PR_1 = PRRef(kind="dc", project_or_workspace="NDP", repo_slug="nd-mfe", pr_id=1, dc_base_url="https://stash.x.com")
@@ -139,3 +139,22 @@ def test_discover_exits_when_nothing_found():
     jc.get_remote_links.return_value = []
     with pytest.raises(SystemExit, match="No Bitbucket PR found"):
         _discover_pr_ref(None, "no links here", jc, "SOFT-1", "123", settings)
+
+
+# --- skip_review_before_post ---
+
+def test_skip_review_single_pr_default():
+    assert skip_review_before_post(1, yes=False, review=False) is True
+
+
+def test_skip_review_single_pr_with_review_flag():
+    assert skip_review_before_post(1, yes=False, review=True) is False
+
+
+def test_skip_review_multiple_prs_requires_yes():
+    assert skip_review_before_post(2, yes=False, review=False) is False
+    assert skip_review_before_post(2, yes=True, review=False) is True
+
+
+def test_skip_review_yes_overrides_review():
+    assert skip_review_before_post(2, yes=True, review=True) is True

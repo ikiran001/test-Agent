@@ -25,14 +25,30 @@ _DIVIDER = "=" * 70
 # ~4 chars per token, 30K TPM limit → ~120K chars total.
 # We reserve ~30K chars for ticket text + prompt, so 90K for diffs.
 _MAX_TOTAL_DIFF_CHARS = 90_000
+# Hard cap on regenerate-on-feedback iterations to bound LLM cost on runaway sessions.
+_MAX_REVIEW_ITERATIONS = 5
+
+
+def skip_review_before_post(n_selected_prs: int, *, yes: bool, review: bool) -> bool:
+    """Whether to skip the interactive review and post immediately.
+
+    - ``--yes``: always skip review (any PR count).
+    - ``--review``: always show review (unless ``--yes`` also set).
+    - Otherwise: skip review only when exactly one PR is selected.
+    """
+    if yes:
+        return True
+    if review:
+        return False
+    return n_selected_prs == 1
 
 
 def _load_dotenv() -> None:
-    here = Path(__file__).resolve()
+    """Load env vars from the first .env found: CWD, then repo root."""
+    repo_root = Path(__file__).resolve().parents[1]
     candidates = [
-        here.parents[1] / "docs/superpowers/specs/.env",
-        Path.cwd() / "docs/superpowers/specs/.env",
         Path.cwd() / ".env",
+        repo_root / ".env",
     ]
     for p in candidates:
         if p.is_file():
@@ -191,6 +207,7 @@ def _review_loop(
     Returns the final approved report markdown.
     """
     report_md = build_test_report(llm, bundle, issue_type=issue_type)
+    iterations = 0
 
     while True:
         print()
@@ -224,9 +241,18 @@ def _review_loop(
             print("Report discarded. Nothing posted to Jira.")
             sys.exit(0)
 
+        iterations += 1
+        if iterations >= _MAX_REVIEW_ITERATIONS:
+            print(
+                f"\nReached max feedback iterations ({_MAX_REVIEW_ITERATIONS}). "
+                "Please answer 'y' to post or 'n' to discard."
+            )
+            no_confirm = False  # explicit stop on further feedback
+            continue
+
         # User gave feedback — regenerate with it
         print()
-        print("Regenerating with your feedback...")
+        print(f"Regenerating with your feedback (iteration {iterations}/{_MAX_REVIEW_ITERATIONS})...")
         feedback_bundle = (
             bundle
             + f"\n\n---\nUser feedback on previous report (please revise accordingly):\n{answer}\n"
@@ -239,8 +265,9 @@ def main(argv: list[str] | None = None) -> None:
     _load_dotenv()
     p = argparse.ArgumentParser(
         description=(
-            "Jira ticket + Bitbucket PR diff → LLM test cases → "
-            "interactive review → Jira comment"
+            "Jira ticket + Bitbucket PR diff → LLM test cases → Jira comment. "
+            "If exactly one PR is linked (or selected), posts without confirmation. "
+            "Multiple PRs: pick PRs, then review before posting."
         )
     )
     p.add_argument("issue_key", help="e.g. PROJ-123")
@@ -254,7 +281,17 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument(
         "--yes",
         action="store_true",
-        help="Skip interactive review and post directly to Jira without asking",
+        help="Skip interactive review and post directly (even when multiple PRs)",
+    )
+    p.add_argument(
+        "--review",
+        action="store_true",
+        help="Always show interactive review before posting (overrides single-PR auto-post)",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run the full pipeline but print the ADF payload instead of posting to Jira",
     )
     args = p.parse_args(argv)
 
@@ -321,11 +358,22 @@ Comments:
 {chr(10).join(pr_sections)}
 """
 
-    llm = ChatOpenAI(model=settings.openai_model, temperature=0)
-    report_md = _review_loop(args.issue_key, summary, bundle, llm, issue_type, no_confirm=args.yes)
+    # Single PR (after discovery / --pr): post without asking, unless --review.
+    # Multiple PRs: ask for confirmation unless --yes.
+    no_confirm = skip_review_before_post(len(selected_refs), yes=args.yes, review=args.review)
+    if no_confirm and not args.yes and len(selected_refs) == 1:
+        print("Exactly one PR — posting to Jira after generation (no confirmation prompt).")
 
-    # Build ADF and post
+    llm = ChatOpenAI(model=settings.openai_model, temperature=0)
+    report_md = _review_loop(args.issue_key, summary, bundle, llm, issue_type, no_confirm=no_confirm)
+
+    # Build ADF and post (or print, if --dry-run)
     sections = sections_from_markdown(report_md)
     adf = adf_doc_from_report(sections)
+    if args.dry_run:
+        import json
+        print("\n--dry-run: not posting. ADF payload:")
+        print(json.dumps(adf, indent=2))
+        return
     jc.add_comment(args.issue_key, adf)
     print(f"\nPosted test plan comment on {args.issue_key}.")
